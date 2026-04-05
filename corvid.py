@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-wiki.py -- Personal knowledge wiki with hybrid search (keyword + semantic).
+corvid -- Permanent memory layer for AI coding agents.
 
 Commands:
-    python wiki.py init                  Create database
-    python wiki.py index <file>          Index one file
-    python wiki.py index-all             Re-index entire wiki/ directory
-    python wiki.py search <query>        Search (human-readable)
-    python wiki.py search <query> --json Search (machine-readable)
-    python wiki.py stats                 Show article counts
+    corvid init                  Create database and wiki directory
+    corvid index <file>          Index one file
+    corvid index-all             Re-index entire wiki/ directory
+    corvid search <query>        Search (human-readable)
+    corvid search <query> --json Search (machine-readable)
+    corvid stats                 Show article counts
 
 Search modes:
     Default: hybrid (keyword + semantic). Falls back to keyword-only if
@@ -46,8 +46,8 @@ EMBED_DIM = 384  # bge-small-en-v1.5
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 
 # ── Configuration ──────────────────────────────────────────────
-WIKI_DIR = os.environ.get("CLAUDE_WIKI", os.path.expanduser("~/claude-wiki"))
-DB_PATH = os.path.join(WIKI_DIR, "wiki.db")
+WIKI_DIR = os.environ.get("CORVID_HOME", os.path.expanduser("~/corvid"))
+DB_PATH = os.path.join(WIKI_DIR, "corvid.db")
 ARTICLES_DIR = os.path.join(WIKI_DIR, "wiki")
 
 

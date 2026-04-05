@@ -1,12 +1,12 @@
 ---
 name: remember
-description: Use when the user says /remember, wants to save an insight, or says "save this", "remember this". Also use PROACTIVELY at the start of complex tasks -- search the cross-project wiki at ~/claude-wiki/ via `python3 ~/claude-wiki/wiki.py search "<topic>" --json` to check for relevant past knowledge before starting work.
+description: Use when the user says /remember, wants to save an insight, or says "save this", "remember this". Also use PROACTIVELY at the start of complex tasks -- search the cross-project wiki at ~/corvid/ via `python3 ~/corvid/corvid.py search "<topic>" --json` to check for relevant past knowledge before starting work.
 allowed-tools: Bash(python3:*), Bash(python:*), Bash(cat:*), Bash(mkdir:*), Read, Write, Glob, Grep
 ---
 
 # /remember -- Save Knowledge to Wiki
 
-You maintain a personal knowledge wiki at `~/claude-wiki/wiki/`. When the user says `/remember`, distill the current insight and save it.
+You maintain a personal knowledge wiki at `~/corvid/wiki/`. When the user says `/remember`, distill the current insight and save it.
 
 ## How It Works
 
@@ -19,19 +19,19 @@ You maintain a personal knowledge wiki at `~/claude-wiki/wiki/`. When the user s
 
 1. **Distill**: Extract the key insight, decision, finding, or lesson from the conversation. Write it as a concise, useful article, not a raw dump. Think: "what would be useful to know 6 months from now?"
 
-2. **Check INDEX.md**: Read `~/claude-wiki/INDEX.md` to see if a related article already exists.
+2. **Check INDEX.md**: Read `~/corvid/INDEX.md` to see if a related article already exists.
    - If yes: read that article and UPDATE it with the new information
    - If no: create a new article
 
-3. **Write the article**: Save to `~/claude-wiki/wiki/<category>/<slug>.md`
+3. **Write the article**: Save to `~/corvid/wiki/<category>/<slug>.md`
    - Pick a category from existing ones, or create a new one if nothing fits
    - Use a descriptive slug: `auth-token-rotation.md`, not `note-001.md`
    - Format: `# Title`, then clear, scannable content with headers/bullets/tables as needed
    - Include: what, why, and any specific values/commands/gotchas worth remembering
 
-4. **Index it**: Run `python3 ~/claude-wiki/wiki.py index <filepath>`
+4. **Index it**: Run `python3 ~/corvid/corvid.py index <filepath>`
 
-5. **Update INDEX.md**: Add or update the one-line entry in `~/claude-wiki/INDEX.md`
+5. **Update INDEX.md**: Add or update the one-line entry in `~/corvid/INDEX.md`
 
 ## INDEX.md Format
 

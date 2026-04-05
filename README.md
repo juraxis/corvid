@@ -1,157 +1,172 @@
-# claude-wiki
+# corvid
 
-Cross-project memory for Claude Code with semantic search. One command: `/remember`.
+A permanent memory layer for AI coding agents.
 
-## The problem
+Save what matters with `/remember`. Retrieve it from any project with search. Stop re-solving the same problem twice.
 
-Claude Code forgets everything between sessions. You spend an hour figuring something out, close the terminal, and next time Claude starts from zero.
+Claude Code, Codex, Gemini CLI, or any agent that can run a shell command. One Python file, one skill file, works everywhere.
 
-Its built-in memory does not solve this. Here is what it actually does:
+## Why
 
-- It saves small notes to `~/.claude/projects/<your-project>/memory/`
-- Those notes only load when you are in that specific project
-- It truncates at 200 lines, so longer findings get cut off
-- There is no search. Claude reads the files top to bottom and hopes the relevant one is near the top
-- Claude decides what to save automatically, so you cannot control what sticks
+The expensive part of working with AI is not writing things down. It is re-learning the same thing three months later in a different project.
 
-That works for simple per-project preferences like "use tabs not spaces." It does not work when you need knowledge to travel between projects, or when the thing you learned is too detailed for 200 lines, or when you need to find something you saved three months ago.
+Built-in AI memory is per-project, short, and has no search. You solve a hard problem on Monday, start a new project on Friday, and your agent has no idea it ever happened.
 
-claude-wiki fixes that.
+corvid fixes that. Every project feeds one shared knowledge base. Search finds things by meaning, not just keywords. A 33MB local model runs the semantic search on your CPU in milliseconds. No server, no API calls, no GPU.
 
-| | Built-in memory | claude-wiki |
+## Who this is for
+
+### The agentic coder
+
+You spend 90 minutes figuring out why a background job deadlocks only under production concurrency.
+
+```
+You: /remember
+```
+
+corvid saves the root cause, what looked misleading, the fix, and how to verify it. Three projects later, same stack, similar symptom. Your agent finds the article and starts from the answer.
+
+### The lawyer working with AI
+
+You are reviewing a target's contracts and find that a change-of-control clause puts a meaningful share of revenue at risk.
+
+```
+You: /remember
+```
+
+corvid saves the clause pattern, why it matters, what follow-up to request, and what mitigation language actually worked. Next deal, same pattern. Your agent already knows what to flag.
+
+### The vibe-coder with too many projects
+
+One week it is a deploy config. Next week a webhook edge case. Then a schema drift between local and remote. Each one takes an hour. Each one feels obvious after you solve it. Each one gets forgotten anyway.
+
+```
+You: /remember
+```
+
+Those become searchable articles instead of disappearing into chat history.
+
+## What people actually save
+
+- The deploy fix that only breaks in production
+- The clause pattern that killed a deal
+- The migration sequence that avoided data loss
+- The negotiation fallback language that got accepted
+- The API behavior nobody documented
+- The architecture decision and the reasoning behind it
+- The research summary you do not want to recreate in six weeks
+
+## How it compares to built-in memory
+
+| | Built-in agent memory | corvid |
 |---|---|---|
-| Scope | Per-project only | Cross-project, one wiki for everything |
-| Size limit | Truncates at 200 lines | Unlimited articles, no cap |
-| Search | None, reads files in order | Hybrid: keyword (FTS5) + semantic (33MB model) |
-| What gets saved | Claude decides automatically | You decide with `/remember` |
-| Retrieval | Loaded only in that project | Searchable from any project, any session |
-| Format | Short memory notes | Full articles with tables, numbers, reasoning |
+| Scope | Per-project | Cross-project |
+| Size | Truncates at ~200 lines | Unlimited articles |
+| Search | None | Keyword + semantic (finds by meaning) |
+| Control | Agent decides what to save | You decide with `/remember` |
+| Retrieval | Only in that one project | Any project, any session |
+| Format | Short notes | Full articles with tables, numbers, reasoning |
 
-## How it works
+## Setup
 
-### A lawyer building a case across sessions
-
-You are reviewing a target's contracts and find that a change-of-control clause threatens 38% of ARR. That kind of finding matters beyond this one deal.
-
-```
-You: /remember
-
-Claude writes:
-  ~/claude-wiki/wiki/contracts/coc-termination-risk.md
-
-  # Change of Control - Termination Risk Pattern
-  Key customer contract (38% of ARR) contains change-of-control
-  termination right. No consent obtained. Must be closing
-  condition or renegotiated pre-sign...
+```bash
+pip install corvid-wiki
+corvid init
 ```
 
-Two weeks later, different client, similar deal structure:
+That is it. corvid creates `~/corvid/` with the database and wiki directory.
 
-```
-You: "Review this target's customer contracts for COC risk"
+To connect it to Claude Code:
 
-Claude searches the wiki automatically
-  -> finds the article from last deal
-  -> already knows the pattern, the risk, and what to flag
+```bash
+corvid install-skill
 ```
 
-The lesson carried over. You never re-explained it.
+This drops the skill file into `~/.claude/skills/remember/`. Now `/remember` works in every session.
 
-### A vibe-coder who keeps hitting the same walls
-
-Every few projects, you run into something that takes real time to solve. A deploy config that silently breaks in production. A database migration that works locally but fails on the remote. An API that behaves differently on v2 vs v3 with no mention in the changelog.
+For other agents (Codex, Gemini CLI, Cursor), add this to your agent's system instructions or project config:
 
 ```
-You: "That took way too long to figure out"
-You: /remember
+Before starting work, search for relevant knowledge:
+python3 ~/corvid/corvid.py search "<topic>" --json
 
-Claude writes:
-  ~/claude-wiki/wiki/debugging/postgres-migration-remote-timeout.md
+When the user says /remember, distill the insight and save it:
+write to ~/corvid/wiki/<category>/<slug>.md
+then run: python3 ~/corvid/corvid.py index <filepath>
 ```
 
-Next project, same stack. Claude searches the wiki before you even ask, finds the article, and skips the debugging entirely. The more you use it, the fewer hours you waste re-solving problems you already solved.
+### Optional: semantic search
+
+```bash
+pip install fastembed sqlite-vec
+```
+
+This adds a 33MB embedding model that runs locally on CPU. Now searching "concurrent writes deadlock" finds your article about a "race condition" even though it never uses those words. No GPU, no PyTorch, no server, no API calls.
+
+Without these packages, corvid falls back to keyword search silently. Both modes work. Both are fast.
+
+## Search
+
+```bash
+corvid search "change of control"
+corvid search "indemnity structure" --json
+corvid stats
+```
+
+Keyword search uses SQLite FTS5 with Porter stemming and BM25 ranking. "Finetuning" matches "fine-tuned."
+
+With semantic search enabled, corvid also finds articles by meaning. Both results are merged: keyword matches first, then semantic fills in what keyword missed.
+
+## What gets saved
+
+Your agent writes markdown articles organized by category. You never touch the structure.
+
+```
+~/corvid/
+  corvid.py          # one file, Python stdlib + optional fastembed/sqlite-vec
+  corvid.db          # search index (disposable, rebuildable from articles)
+  INDEX.md           # table of contents your agent maintains
+  wiki/
+    contracts/
+      indemnity-cap-carveouts.md
+      coc-termination-risk.md
+    debugging/
+      job-queue-deadlock-under-load.md
+      schema-drift-local-remote.md
+```
+
+These are real articles. Tables, exact numbers, specific commands, reasoning. Not chat logs.
 
 ## Inspired by Karpathy's LLM Wiki
 
-Karpathy's [llm-wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) builds persistent knowledge bases by ingesting external docs into a wiki. We borrowed the core idea but changed the entry point: your source material is the conversation itself, not external files.
+Karpathy's [llm-wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) builds knowledge bases by ingesting external docs into a wiki. corvid borrows the core idea but changes the entry point: your source is the conversation, not external files.
 
-| | Karpathy's LLM Wiki | claude-wiki |
+| | Karpathy's LLM Wiki | corvid |
 |---|---|---|
-| Source | External docs, papers, repos | Your conversation with Claude |
+| Source | External docs, papers, repos | Your conversation with the agent |
 | Ingest | Copy to `raw/`, LLM compiles | `/remember` distills in real-time |
 | Search | qmd (BM25 + vector + re-ranking) | Hybrid: FTS5 keyword + semantic vector |
 | Best for | Research knowledge | Working knowledge |
 
 His system is a research librarian. This is a working notebook. They compose if you want both.
 
-## Setup
+## Under the hood
 
-```bash
-# Install
-mkdir -p ~/claude-wiki/wiki ~/.claude/skills/remember
-cp wiki.py ~/claude-wiki/wiki.py
-cp SKILL.md ~/.claude/skills/remember/SKILL.md
-python3 ~/claude-wiki/wiki.py init
+corvid is one Python file. The search index is [SQLite FTS5](https://www.sqlite.org/fts5.html) for keyword search and [sqlite-vec](https://github.com/asg017/sqlite-vec) for vector search, both running inside the same SQLite database. Embeddings come from [fastembed](https://github.com/qdrant/fastembed) (ONNX Runtime, CPU-only, 33MB model). No external services. Everything runs locally.
 
-# Optional: enable semantic search (33MB model, CPU only, no GPU)
-pip install fastembed sqlite-vec
-```
-
-Open Claude Code in any project. Say `/remember`. Done.
-
-## Search
-
-Keyword search works out of the box via SQLite FTS5 with Porter stemming and BM25 ranking. "Finetuning" matches "fine-tuned."
-
-With `fastembed` + `sqlite-vec` installed, semantic search activates automatically. Searching "concurrent writes deadlock" finds your article about a "race condition" even though it never uses those words. The embedding model ([bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5)) is 33MB, runs on CPU in ~50ms per article, and needs no GPU, no PyTorch, no server.
-
-Both modes run together. Keyword first, then semantic fills in what keyword missed. Falls back to keyword-only silently if the packages are not installed.
-
-```bash
-python3 ~/claude-wiki/wiki.py search "change of control"
-python3 ~/claude-wiki/wiki.py search "indemnity structure" --json
-python3 ~/claude-wiki/wiki.py stats
-```
-
-## What gets saved
-
-Claude writes markdown articles organized by category. You never touch the structure.
-
-```
-~/claude-wiki/
-  wiki.py              # one file, Python stdlib + optional fastembed/sqlite-vec
-  wiki.db              # search index (disposable, rebuildable from articles)
-  INDEX.md             # table of contents Claude maintains
-  wiki/
-    contracts/
-      indemnity-cap-carveouts.md
-      coc-termination-risk.md
-    litigation/
-      discovery-scope-preservation.md
-    debugging/
-      postgres-migration-remote-timeout.md
-```
-
-Real articles with tables, exact numbers, specific commands, reasoning. Not chat logs.
-
-## Use cases
-
-**Legal professionals**: diligence findings that carry across deals, clause patterns that worked (or did not), jurisdictional research you do not want to redo, settlement positions with exact figures and deadlines.
-
-**Developers**: the deploy fix that took three hours and you never want to debug again, the API behavior that is not in the docs, architecture decisions and the reasoning behind them.
-
-**Anyone working across projects**: you learn it once, `/remember`, Claude has it forever.
+The database is a disposable cache. Delete it and run `corvid index-all` to rebuild from the markdown files. The articles are always the source of truth.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `wiki.py init` | Create the database |
-| `wiki.py index <file>` | Index one markdown file |
-| `wiki.py index-all` | Re-index all files in wiki/ |
-| `wiki.py search <query>` | Search (human-readable) |
-| `wiki.py search <query> --json` | Search (JSON for Claude) |
-| `wiki.py stats` | Show article counts |
+| `corvid init` | Create the database and wiki directory |
+| `corvid index <file>` | Index one markdown file |
+| `corvid index-all` | Re-index all files in wiki/ |
+| `corvid search <query>` | Search (human-readable) |
+| `corvid search <query> --json` | Search (JSON for agents) |
+| `corvid stats` | Show article counts |
+| `corvid install-skill` | Install the /remember skill for Claude Code |
 
 ## License
 
