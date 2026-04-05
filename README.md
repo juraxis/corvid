@@ -105,34 +105,42 @@ Six months later, different project, same stack. You do not re-learn it. You do 
 ## Setup
 
 ```bash
-# 1. Clone and copy the two files
-git clone https://github.com/juraxis/corvid.git /tmp/corvid
-mkdir -p ~/corvid/wiki
-cp /tmp/corvid/corvid.py ~/corvid/corvid.py
-
-# 2. Install the /remember skill for Claude Code
-mkdir -p ~/.claude/skills/remember
-cp /tmp/corvid/SKILL.md ~/.claude/skills/remember/SKILL.md
-
-# 3. Initialize the database
-python3 ~/corvid/corvid.py init
-
-# 4. Optional: enable semantic search (33MB model, CPU only, no GPU)
-pip install fastembed sqlite-vec
+pip install corvid-remember
+corvid install
 ```
 
-Open any project in Claude Code. Say `/remember`. That is it.
-
-For other agents (Codex, Gemini CLI, Cursor), add this to your agent's system prompt or project config:
+That is it. Two commands. `pip install` gets the CLI and all dependencies (semantic search included). `corvid install` auto-detects your agents (Claude Code, Codex CLI) and installs the `/remember` skill for each.
 
 ```
-Search for relevant knowledge before starting work:
-python3 ~/corvid/corvid.py search "<topic>" --json
+$ corvid install
 
-When the user says /remember, distill the insight and save it:
-write to ~/corvid/wiki/<category>/<slug>.md
-then run: python3 ~/corvid/corvid.py index <filepath>
+  ✓ Claude Code      → ~/.claude/skills/remember/SKILL.md
+  ✓ Codex CLI        → ~/.codex/skills/remember/SKILL.md
+
+  Wiki: ~/corvid
+  Semantic search: enabled (BAAI/bge-small-en-v1.5)
+
+  Done. Use /remember in your next session.
 ```
+
+Open any project. Say `/remember`. Done.
+
+### Alternative: install via npx skills
+
+```bash
+npx skills add juraxis/corvid
+pip install fastembed sqlite-vec   # for semantic search
+corvid init                        # or: python3 ~/.claude/skills/remember/corvid.py init
+```
+
+### Keyword-only mode (no heavy dependencies)
+
+```bash
+pip install corvid-remember[lite]
+corvid install
+```
+
+Keyword search works out of the box via SQLite FTS5. Semantic search requires the full install.
 
 ## Search
 
@@ -143,9 +151,9 @@ With `fastembed` + `sqlite-vec` installed, semantic search activates automatical
 Both modes run together. Falls back to keyword-only silently if the packages are not installed.
 
 ```bash
-python3 ~/corvid/corvid.py search "oauth redirect"
-python3 ~/corvid/corvid.py search "supabase row level security" --json
-python3 ~/corvid/corvid.py stats
+corvid search "oauth redirect"
+corvid search "supabase row level security" --json
+corvid stats
 ```
 
 ## What gets saved
@@ -185,18 +193,19 @@ His system is a research librarian. This is a working notebook. They compose if 
 
 corvid is one Python file. The search index is [SQLite FTS5](https://www.sqlite.org/fts5.html) for keyword search and [sqlite-vec](https://github.com/asg017/sqlite-vec) for vector search, both inside the same SQLite database. Embeddings come from [fastembed](https://github.com/qdrant/fastembed) (ONNX Runtime, CPU-only, 33MB model). No external services. Everything runs locally.
 
-The database is disposable. Delete it and run `corvid.py index-all` to rebuild from the markdown files. The articles are always the source of truth.
+The database is disposable. Delete it and run `corvid index-all` to rebuild from the markdown files. The articles are always the source of truth.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `corvid.py init` | Create the database and wiki directory |
-| `corvid.py index <file>` | Index one markdown file |
-| `corvid.py index-all` | Re-index all files in wiki/ |
-| `corvid.py search <query>` | Search (human-readable) |
-| `corvid.py search <query> --json` | Search (JSON for agents) |
-| `corvid.py stats` | Show article counts |
+| `corvid install` | Detect agents, install skill, init database |
+| `corvid init` | Create the database and wiki directory |
+| `corvid index <file>` | Index one markdown file |
+| `corvid index-all` | Re-index all files in wiki/ |
+| `corvid search <query>` | Search (human-readable) |
+| `corvid search <query> --json` | Search (JSON for agents) |
+| `corvid stats` | Show article counts |
 
 ## License
 

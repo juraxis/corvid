@@ -3,6 +3,7 @@
 corvid -- Permanent memory layer for AI coding agents.
 
 Commands:
+    corvid install               Detect agents, install skill, init database
     corvid init                  Create database and wiki directory
     corvid index <file>          Index one file
     corvid index-all             Re-index entire wiki/ directory
@@ -402,6 +403,143 @@ def cmd_stats():
     print()
 
 
+# ── Install ───────────────────────────────────────────────────
+import shutil
+import textwrap
+
+# Agent skill directories (global/user-level)
+AGENTS = {
+    "Claude Code": os.path.expanduser("~/.claude/skills/remember"),
+    "Codex CLI": os.path.expanduser("~/.codex/skills/remember"),
+}
+
+_SKILL_MD = textwrap.dedent("""\
+    ---
+    name: remember
+    description: >-
+      Use when the user says /remember, wants to save an insight, or says
+      "save this", "remember this". Also use PROACTIVELY at the start of
+      complex tasks -- search the cross-project wiki at ~/corvid/ via
+      `corvid search "<topic>" --json` to check for relevant past knowledge
+      before starting work.
+    allowed-tools: Bash(corvid:*), Bash(python3:*), Bash(python:*), Bash(cat:*), Bash(mkdir:*), Read, Write, Glob, Grep
+    ---
+
+    # /remember -- Save Knowledge to Wiki
+
+    You maintain a personal knowledge wiki at `~/corvid/wiki/`. When the user says `/remember`, distill the current insight and save it.
+
+    ## How It Works
+
+    ```
+    /remember              -> You distill the key insight from conversation context
+    /remember "exact text" -> Save the user's exact words as the core content
+    ```
+
+    ## Steps
+
+    1. **Distill**: Extract the key insight, decision, finding, or lesson from the conversation. Write it as a concise, useful article, not a raw dump. Think: "what would be useful to know 6 months from now?"
+
+    2. **Check INDEX.md**: Read `~/corvid/INDEX.md` to see if a related article already exists.
+       - If yes: read that article and UPDATE it with the new information
+       - If no: create a new article
+
+    3. **Write the article**: Save to `~/corvid/wiki/<category>/<slug>.md`
+       - Pick a category from existing ones, or create a new one if nothing fits
+       - Use a descriptive slug: `auth-token-rotation.md`, not `note-001.md`
+       - Format: `# Title`, then clear, scannable content with headers/bullets/tables as needed
+       - Include: what, why, and any specific values/commands/gotchas worth remembering
+
+    4. **Index it**: Run `corvid index <filepath>`
+
+    5. **Update INDEX.md**: Add or update the one-line entry in `~/corvid/INDEX.md`
+
+    ## INDEX.md Format
+
+    ```markdown
+    # Wiki Index
+
+    ## <Category>
+    - [Article Title](wiki/<category>/<slug>.md) -- one-line summary
+    ```
+
+    Keep entries under 120 characters. This file is the master table of contents.
+
+    ## Article Style
+
+    - Write for your future self (or a future Claude session)
+    - Be specific: include exact commands, model names, versions, numbers
+    - Do not pad with filler. Every sentence should carry information
+    - Use tables for comparisons, bullets for lists, code blocks for commands
+    - If updating an existing article, preserve what is there and add the new info
+
+    ## Categories
+
+    Organic, create as needed. Examples:
+    - `contracts/` -- clause drafting, redlining, review patterns
+    - `litigation/` -- discovery, motions, settlement strategy
+    - `compliance/` -- regulatory analysis, audit findings
+    - `infrastructure/` -- pods, servers, deployment
+    - `debugging/` -- hard-won fixes and gotchas
+
+    ## What NOT to save
+
+    - Ephemeral task state (use Claude's built-in memory for that)
+    - Raw session transcripts
+    - Code snippets without context
+    - Anything already in the project's CLAUDE.md
+""")
+
+
+def cmd_install():
+    """Detect agents, install skill, initialize database."""
+    print()
+
+    # 1. Detect and install to agents
+    installed = []
+    for agent_name, skill_dir in AGENTS.items():
+        agent_base = os.path.dirname(os.path.dirname(skill_dir))  # e.g. ~/.claude
+        if os.path.isdir(agent_base):
+            os.makedirs(skill_dir, exist_ok=True)
+            skill_path = os.path.join(skill_dir, "SKILL.md")
+            with open(skill_path, "w", encoding="utf-8") as f:
+                f.write(_SKILL_MD)
+            installed.append((agent_name, skill_path))
+            print(f"  \u2713 {agent_name:16s} \u2192 {skill_path}")
+        else:
+            print(f"  - {agent_name:16s} \u2192 not found, skipping")
+
+    if not installed:
+        # No agent dirs found -- install for Claude Code anyway (most common)
+        skill_dir = AGENTS["Claude Code"]
+        os.makedirs(skill_dir, exist_ok=True)
+        skill_path = os.path.join(skill_dir, "SKILL.md")
+        with open(skill_path, "w", encoding="utf-8") as f:
+            f.write(_SKILL_MD)
+        installed.append(("Claude Code", skill_path))
+        print(f"  \u2713 Claude Code      \u2192 {skill_path} (created)")
+
+    # 2. Init wiki + database
+    print()
+    os.makedirs(ARTICLES_DIR, exist_ok=True)
+    conn = get_db()
+    conn.close()
+    print(f"  Wiki: {WIKI_DIR}")
+    print(f"  Database: {DB_PATH}")
+
+    # 3. Report semantic search status
+    print()
+    if _SEMANTIC_AVAILABLE:
+        print(f"  Semantic search: enabled ({EMBED_MODEL})")
+    else:
+        print("  Semantic search: disabled")
+        print("  Run: pip install fastembed sqlite-vec")
+
+    print()
+    print("  Done. Use /remember in your next session.")
+    print()
+
+
 # ── CLI ────────────────────────────────────────────────────────
 def main():
     if len(sys.argv) < 2:
@@ -410,7 +548,10 @@ def main():
 
     cmd = sys.argv[1]
 
-    if cmd == "init":
+    if cmd == "install":
+        cmd_install()
+
+    elif cmd == "init":
         conn = get_db()
         conn.close()
         print(f"Wiki ready at {WIKI_DIR}")
