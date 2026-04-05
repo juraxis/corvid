@@ -48,18 +48,37 @@ Claude searches the wiki automatically
 
 You never re-explained. You never re-discovered. The lesson carried over.
 
-### A developer shipping across repos
+### A developer vibe-coding across repos
 
-You spent an hour figuring out that the Gemini Flex tier needs `google-genai` v1.70+ and that batch API jobs on preview models can stall indefinitely.
+You just burned two hours debugging why your auth flow breaks after deploy. Turns out the session cookie needs `SameSite=None` with `Secure` when running behind a reverse proxy, and the redirect URI has to match the exact casing registered with the OAuth provider.
 
 ```
 You: /remember
 
 Claude writes:
-  ~/claude-wiki/wiki/infrastructure/gemini-flex-tier.md
+  ~/claude-wiki/wiki/debugging/oauth-redirect-behind-proxy.md
 ```
 
-Next month, different repo, you need Gemini again. Claude finds the article, skips the hour of debugging, and uses Flex from the start.
+Three months later, different app, same deploy setup. You start wiring up auth and Claude already knows the gotcha. Two hours saved. Multiply that across every hard-won lesson in every repo you touch.
+
+## Inspired by Karpathy's LLM Wiki
+
+Karpathy's [llm-wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) describes building persistent knowledge bases with LLMs: ingest sources into a `raw/` directory, have the LLM compile them into a structured markdown wiki, then query and refine over time. The LLM does the tedious bookkeeping. The human directs and reads. Knowledge compounds.
+
+We borrowed that core idea. But our entry point is different.
+
+| | Karpathy's LLM Wiki | claude-wiki |
+|---|---|---|
+| Source material | External docs (papers, articles, repos) | Your conversation with Claude |
+| Ingest step | Copy files to `raw/`, LLM compiles | `/remember` distills in real-time |
+| Wiki compilation | LLM reads raw, writes summaries | Claude writes directly from context |
+| Search | qmd (BM25 + vector + re-ranking) | SQLite FTS5 (BM25 + Porter stemming) |
+| Frontend | Obsidian | Any editor, or just let Claude read it |
+| Best for | Research knowledge (papers, datasets) | Working knowledge (decisions, findings, gotchas) |
+
+Karpathy's system is a research librarian. This system is a working notebook.
+
+If you want both, they compose. Use his approach for ingesting papers and articles. Use this for capturing what you learn while working. They write to different directories and do not conflict.
 
 ## Setup (2 minutes)
 
@@ -88,7 +107,7 @@ To search manually:
 
 ```bash
 python3 ~/claude-wiki/wiki.py search "change of control"
-python3 ~/claude-wiki/wiki.py search "indemnity cap" --json
+python3 ~/claude-wiki/wiki.py search "session cookie proxy" --json
 python3 ~/claude-wiki/wiki.py stats
 ```
 
@@ -108,10 +127,8 @@ Claude writes markdown articles organized by category. You never touch the struc
     litigation/
       discovery-scope-preservation.md
       fmla-retaliation-risk.md
-    compliance/
-      multi-state-breach-notification.md
-    infrastructure/
-      gemini-flex-tier.md
+    debugging/
+      oauth-redirect-behind-proxy.md
 ```
 
 These are real articles with tables, exact numbers, specific commands, and the reasoning behind decisions. Not chat logs. Not raw dumps. Written so that a future Claude session, or you, can read them and act immediately.
@@ -127,33 +144,14 @@ These are real articles with tables, exact numbers, specific commands, and the r
 
 ### Technical work
 
-- Model evaluation results with exact scores, not just "it did well"
-- Training strategy decisions: why this approach, what the mix ratio should be, what to avoid
-- Infrastructure gotchas: which API version supports which feature, rate limit workarounds, deployment quirks
 - Architecture decisions: why you chose this pattern, what you considered, what failed
+- Deployment fixes: the exact config that solved the production issue, not a vague note that "it was a config problem"
+- API quirks: version-specific behavior, undocumented limits, workarounds that took hours to find
+- Training and evaluation results: exact scores, hyperparameters, what worked and what regressed
 
 ### Any multi-project workflow
 
 You learn something in Project A. Months later in Project B, you need it. Without a cross-project wiki, it is gone. With `/remember`, Claude finds it.
-
-## Inspired by Karpathy's LLM Wiki
-
-Karpathy's [llm-wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) describes building persistent knowledge bases with LLMs: ingest sources into a `raw/` directory, have the LLM compile them into a structured markdown wiki, then query and refine over time. The LLM does the tedious bookkeeping. The human directs and reads. Knowledge compounds.
-
-We borrowed that core idea. But our entry point is different.
-
-| | Karpathy's LLM Wiki | claude-wiki |
-|---|---|---|
-| Source material | External docs (papers, articles, repos) | Your conversation with Claude |
-| Ingest step | Copy files to `raw/`, LLM compiles | `/remember` distills in real-time |
-| Wiki compilation | LLM reads raw, writes summaries | Claude writes directly from context |
-| Search | qmd (BM25 + vector + re-ranking) | SQLite FTS5 (BM25 + Porter stemming) |
-| Frontend | Obsidian | Any editor, or just let Claude read it |
-| Best for | Research knowledge (papers, datasets) | Working knowledge (decisions, findings, gotchas) |
-
-Karpathy's system is a research librarian. This system is a working notebook.
-
-If you want both, they compose. Use his approach for ingesting papers and articles. Use this for capturing what you learn while working. They write to different directories and do not conflict.
 
 ## Technical details
 
