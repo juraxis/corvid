@@ -4,6 +4,15 @@ A permanent memory layer for AI coding agents. Installs as a native skill. One c
 
 Inspired by Karpathy's [llm-wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) for building knowledge bases with LLMs, but instead of ingesting external docs, corvid captures what you learn during the conversation itself.
 
+### What's new in 0.2.0
+
+Smarter retrieval, fewer tokens, structured knowledge.
+
+- **Reciprocal Rank Fusion** — keyword and semantic results merged by agreement, not appended. Best matches surface first.
+- **Tag pre-filtering** — `corvid search "query" --tags deploy,auth` narrows the search space before computing similarity.
+- **Temporal facts** — corvid extracts structured facts during indexing. When a fact changes, the old one gets marked superseded, not duplicated. `corvid facts` shows what's current.
+- **Smart snippets** — search returns the most relevant paragraph, not the first 200 characters. Agent gets the answer without reading the full file.
+
 ## Why
 
 Every AI session starts from zero. You figure something out, close the terminal, and next month your agent has no memory of it.
