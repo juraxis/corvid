@@ -4,14 +4,21 @@ A permanent memory layer for AI coding agents. Installs as a native skill. One c
 
 Inspired by Karpathy's [llm-wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) for building knowledge bases with LLMs, but instead of ingesting external docs, corvid captures what you learn during the conversation itself.
 
-### What's new in 0.2.0
+### What's new in 0.3.0
 
-Smarter retrieval, fewer tokens, structured knowledge.
+The retrieval engine learns from usage and enforces itself.
 
-- **Reciprocal Rank Fusion** — keyword and semantic results merged by agreement, not appended. Best matches surface first.
-- **Tag pre-filtering** — `corvid search "query" --tags deploy,auth` narrows the search space before computing similarity.
-- **Temporal facts** — corvid extracts structured facts during indexing. When a fact changes, the old one gets marked superseded, not duplicated. `corvid facts` shows what's current.
-- **Smart snippets** — search returns the most relevant paragraph, not the first 200 characters. Agent gets the answer without reading the full file.
+- **Memory feedback loop** — articles that appear in search results get a ranking boost on future searches. The system learns what matters.
+- **PreToolUse hook** — `corvid install` injects a Claude Code hook that reminds the agent to check the wiki before grepping files. Enforced, not hoped for.
+- **Article relations** — markdown links between articles create navigable edges. JSON search results include `"related"` articles so the agent discovers connected knowledge without extra searches.
+- **Confidence scoring** — facts carry confidence levels (low/med/high). Regex-extracted = low, letting agents know what to trust vs verify.
+
+### 0.2.0
+
+- **Reciprocal Rank Fusion** — keyword and semantic results merged by agreement, not appended.
+- **Tag pre-filtering** — `--tags deploy,auth` narrows search space before computing similarity.
+- **Temporal facts** — structured facts with contradiction detection. `corvid facts` shows current vs superseded.
+- **Smart snippets** — best paragraph by query relevance, not first 200 characters.
 
 ## Why
 

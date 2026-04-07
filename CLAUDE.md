@@ -42,11 +42,13 @@ corvid stats                    # Article counts by category
 
 **Single-file monolith**: Everything lives in `corvid.py` — DB schema, indexing, search, CLI, and the embedded SKILL.md template. No internal packages or modules.
 
-**Storage**: SQLite at `~/corvid/corvid.db` (or `$CORVID_HOME/corvid.db`). Four tables:
+**Storage**: SQLite at `~/corvid/corvid.db` (or `$CORVID_HOME/corvid.db`). Six tables:
 - `articles` — source of truth (filepath, filehash, title, category, tags, content, source_project, timestamps)
 - `articles_fts` — FTS5 with Porter stemming + unicode61 tokenizer, auto-synced via INSERT/DELETE/UPDATE triggers
 - `articles_vec` — sqlite-vec for 384-dim embeddings (only created when fastembed + sqlite-vec are installed)
-- `facts` — temporal entity-relationship triples (subject, predicate, object, valid_from, valid_to, article_id)
+- `facts` — temporal entity-relationship triples (subject, predicate, object, confidence, valid_from, valid_to, article_id)
+- `search_hits` — memory feedback loop: records (article_id, query, hit_at) for every search result. Frequently-hit articles get RRF boost (+5% per hit, capped +25%).
+- `links` — article relations extracted from markdown links. (source_id, target_id, relation). JSON search output includes `"related"` articles.
 
 **Hybrid search with RRF**: Keyword (FTS5/BM25) always runs. Semantic (fastembed ONNX + sqlite-vec) runs if available. Results merged via Reciprocal Rank Fusion (k=60) — results both methods agree on rank highest (`hybrid` tag). Optional `--tags` pre-filtering narrows the search space before computing similarity.
 
@@ -60,7 +62,9 @@ corvid stats                    # Article counts by category
 
 **Skill installation**: `corvid install` checks for `~/.claude` and `~/.codex` directories, writes `SKILL.md` into each agent's skill directory. The skill template is embedded as `_SKILL_MD` in corvid.py. A copy also exists at `skills/remember/SKILL.md` — these must stay in sync.
 
-**Auto-migration**: `get_db()` detects missing columns (`tags`) and tables (`facts`) on existing databases and adds them automatically. No need to delete `corvid.db` when upgrading.
+**PreToolUse hook**: `corvid install` writes a Python hook to `~/.claude/hooks/corvid_remind.py` and registers it in `~/.claude/settings.json`. Fires before Bash/Glob/Grep with a wiki reminder. Skips self-triggering on corvid commands.
+
+**Auto-migration**: `get_db()` detects missing columns (`tags`, `confidence`) and tables (`facts`, `search_hits`, `links`) on existing databases and adds them automatically. No need to delete `corvid.db` when upgrading.
 
 ## Key Design Decisions
 

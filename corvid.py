@@ -98,12 +98,44 @@ def get_db():
             CREATE TABLE facts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 subject TEXT NOT NULL, predicate TEXT NOT NULL, object TEXT NOT NULL,
+                confidence REAL DEFAULT 0.6,
                 article_id INTEGER REFERENCES articles(id),
                 valid_from TEXT NOT NULL, valid_to TEXT,
                 extracted_at TEXT NOT NULL
             );
             CREATE INDEX idx_facts_subj ON facts(subject);
             CREATE INDEX idx_facts_pred ON facts(subject, predicate);
+        """)
+    else:
+        # Auto-migrate: add confidence column if missing
+        fact_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)").fetchall()}
+        if "confidence" not in fact_cols:
+            conn.execute("ALTER TABLE facts ADD COLUMN confidence REAL DEFAULT 0.6")
+    # Auto-migrate: add search_hits table for memory feedback loop
+    hits_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='search_hits'"
+    ).fetchone()
+    if not hits_exists:
+        conn.executescript("""
+            CREATE TABLE search_hits (
+                article_id INTEGER REFERENCES articles(id),
+                query TEXT NOT NULL,
+                hit_at TEXT NOT NULL
+            );
+            CREATE INDEX idx_hits_article ON search_hits(article_id);
+        """)
+    # Auto-migrate: add links table for article relations
+    links_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='links'"
+    ).fetchone()
+    if not links_exists:
+        conn.execute("""
+            CREATE TABLE links (
+                source_id INTEGER REFERENCES articles(id),
+                target_id INTEGER REFERENCES articles(id),
+                relation TEXT DEFAULT 'references',
+                PRIMARY KEY (source_id, target_id)
+            )
         """)
     # Auto-add vec table if semantic became available after initial init
     if _SEMANTIC_AVAILABLE:
@@ -165,6 +197,7 @@ def _init_schema(conn):
             subject TEXT NOT NULL,
             predicate TEXT NOT NULL,
             object TEXT NOT NULL,
+            confidence REAL DEFAULT 0.6,
             article_id INTEGER REFERENCES articles(id),
             valid_from TEXT NOT NULL,
             valid_to TEXT,
@@ -172,6 +205,20 @@ def _init_schema(conn):
         );
         CREATE INDEX IF NOT EXISTS idx_facts_subj ON facts(subject);
         CREATE INDEX IF NOT EXISTS idx_facts_pred ON facts(subject, predicate);
+
+        CREATE TABLE IF NOT EXISTS search_hits (
+            article_id INTEGER REFERENCES articles(id),
+            query TEXT NOT NULL,
+            hit_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_hits_article ON search_hits(article_id);
+
+        CREATE TABLE IF NOT EXISTS links (
+            source_id INTEGER REFERENCES articles(id),
+            target_id INTEGER REFERENCES articles(id),
+            relation TEXT DEFAULT 'references',
+            PRIMARY KEY (source_id, target_id)
+        );
     """)
     if _SEMANTIC_AVAILABLE:
         conn.execute(
@@ -246,6 +293,7 @@ def cmd_index(filepath, category=None):
                     )
                     conn.commit()
             _upsert_facts(conn, article_id, _extract_facts(content), now)
+            _extract_links(conn, article_id, content, filepath)
             print(f"UPDATED: {title} [{category}]")
             return True
         else:
@@ -268,6 +316,7 @@ def cmd_index(filepath, category=None):
                     )
                     conn.commit()
             _upsert_facts(conn, article_id, _extract_facts(content), now)
+            _extract_links(conn, article_id, content, filepath)
             print(f"INDEXED: {title} [{category}]")
             return True
     except sqlite3.Error as e:
@@ -324,10 +373,9 @@ def _extract_facts(content):
     return facts
 
 
-def _upsert_facts(conn, article_id, facts, now):
+def _upsert_facts(conn, article_id, facts, now, confidence=0.6):
     """Insert facts, invalidating contradictions (same subject+predicate, different object)."""
     for subj, pred, obj in facts:
-        # Check for existing active fact with same subject+predicate
         existing = conn.execute(
             """SELECT id, object FROM facts
                WHERE subject = ? AND predicate = ? AND valid_to IS NULL""",
@@ -335,16 +383,15 @@ def _upsert_facts(conn, article_id, facts, now):
         ).fetchone()
         if existing:
             if existing["object"] == obj:
-                continue  # Same fact, skip
-            # Contradiction: invalidate old fact
+                continue
             conn.execute(
                 "UPDATE facts SET valid_to = ? WHERE id = ?",
                 (now, existing["id"]),
             )
         conn.execute(
-            """INSERT INTO facts (subject, predicate, object, article_id, valid_from, valid_to, extracted_at)
-               VALUES (?, ?, ?, ?, ?, NULL, ?)""",
-            (subj, pred, obj, article_id, now, now),
+            """INSERT INTO facts (subject, predicate, object, confidence, article_id, valid_from, valid_to, extracted_at)
+               VALUES (?, ?, ?, ?, ?, ?, NULL, ?)""",
+            (subj, pred, obj, confidence, article_id, now, now),
         )
     conn.commit()
 
@@ -355,13 +402,13 @@ def cmd_facts(subject=None):
     try:
         if subject:
             rows = conn.execute(
-                """SELECT subject, predicate, object, valid_from, valid_to, article_id
+                """SELECT subject, predicate, object, confidence, valid_from, valid_to, article_id
                    FROM facts WHERE subject LIKE ? ORDER BY valid_from DESC""",
                 (f"%{subject}%",),
             ).fetchall()
         else:
             rows = conn.execute(
-                """SELECT subject, predicate, object, valid_from, valid_to, article_id
+                """SELECT subject, predicate, object, confidence, valid_from, valid_to, article_id
                    FROM facts WHERE valid_to IS NULL ORDER BY extracted_at DESC LIMIT 50"""
             ).fetchall()
     finally:
@@ -376,9 +423,35 @@ def cmd_facts(subject=None):
     print(f"{'─' * 60}\n")
     for r in rows:
         status = "" if r["valid_to"] is None else f" [superseded {r['valid_to'][:10]}]"
-        print(f"  {r['subject']} → {r['predicate']} → {r['object']}{status}")
+        conf = r["confidence"] or 0.6
+        conf_label = "high" if conf >= 0.9 else "med" if conf >= 0.7 else "low"
+        print(f"  {r['subject']} → {r['predicate']} → {r['object']} ({conf_label}){status}")
     print(f"\n{'─' * 60}")
     print(f" {len(rows)} fact(s)")
+
+
+# ── Links ─────────────────────────────────────────────────────
+_MD_LINK_RE = re.compile(r'\[([^\]]+)\]\(([^)]+\.md)\)')
+
+
+def _extract_links(conn, article_id, content, source_filepath=None):
+    """Extract markdown links to other wiki articles and create edges."""
+    conn.execute("DELETE FROM links WHERE source_id = ?", (article_id,))
+    source_dir = os.path.dirname(source_filepath) if source_filepath else ARTICLES_DIR
+    for _, href in _MD_LINK_RE.findall(content):
+        # Try resolving relative to source article's directory first, then wiki root
+        for base in [source_dir, ARTICLES_DIR]:
+            target_path = os.path.normpath(os.path.join(base, href))
+            target = conn.execute(
+                "SELECT id FROM articles WHERE filepath = ?", (target_path,)
+            ).fetchone()
+            if target and target["id"] != article_id:
+                conn.execute(
+                    "INSERT OR IGNORE INTO links (source_id, target_id, relation) VALUES (?, ?, 'references')",
+                    (article_id, target["id"]),
+                )
+                break
+    conn.commit()
 
 
 # ── Search ─────────────────────────────────────────────────────
@@ -487,6 +560,15 @@ def cmd_search(query, limit=10, as_json=False, tags=None):
     try:
         kw_results = _keyword_search(conn, query, limit, tags=tags)
         sem_results = _semantic_search(conn, query, limit, tags=tags) if _SEMANTIC_AVAILABLE else []
+        # Memory feedback: load hit counts for boost
+        hit_counts = {}
+        try:
+            for row in conn.execute(
+                "SELECT article_id, COUNT(*) as c FROM search_hits GROUP BY article_id"
+            ).fetchall():
+                hit_counts[row["article_id"]] = row["c"]
+        except sqlite3.OperationalError:
+            pass
     finally:
         conn.close()
 
@@ -528,9 +610,51 @@ def cmd_search(query, limit=10, as_json=False, tags=None):
         else:
             entries[rid]["match"] = "hybrid"
 
+    # Apply memory feedback boost: +5% per previous hit, capped at +25%
+    for rid in scores:
+        hits = hit_counts.get(rid, 0)
+        if hits > 0:
+            boost = min(hits * 0.05, 0.25)
+            scores[rid] *= (1.0 + boost)
+
     merged = sorted(entries.values(), key=lambda e: scores[e["id"]], reverse=True)[:limit]
 
+    # Record search hits for feedback loop
+    if merged:
+        now = datetime.now().isoformat()
+        conn = get_db()
+        try:
+            for r in merged:
+                conn.execute(
+                    "INSERT INTO search_hits (article_id, query, hit_at) VALUES (?, ?, ?)",
+                    (r["id"], query, now),
+                )
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        finally:
+            conn.close()
+
     if as_json:
+        # Enrich with related articles via links table
+        if merged:
+            conn = get_db()
+            try:
+                result_ids = {r["id"] for r in merged}
+                for r in merged:
+                    related = conn.execute(
+                        """SELECT a.title, a.filepath FROM links l
+                           JOIN articles a ON a.id = l.target_id
+                           WHERE l.source_id = ?
+                           UNION
+                           SELECT a.title, a.filepath FROM links l
+                           JOIN articles a ON a.id = l.source_id
+                           WHERE l.target_id = ?""",
+                        (r["id"], r["id"]),
+                    ).fetchall()
+                    r["related"] = [{"title": x["title"], "filepath": x["filepath"]} for x in related]
+            finally:
+                conn.close()
         print(json.dumps({
             "query": query,
             "count": len(merged),
@@ -714,6 +838,65 @@ _SKILL_MD = textwrap.dedent("""\
 """)
 
 
+_HOOK_COMMAND = 'python3 -c "import sys; sys.exit(0)" # corvid: wiki reminder active'
+_HOOK_SCRIPT = textwrap.dedent("""\
+    #!/usr/bin/env python3
+    # corvid PreToolUse hook: remind agent to check wiki before searching
+    import json, sys, os
+    DB = os.path.expanduser("~/corvid/corvid.db")
+    if not os.path.exists(DB):
+        sys.exit(0)
+    event = json.load(sys.stdin)
+    tool = event.get("tool_name", "")
+    if tool in ("Bash", "Glob", "Grep"):
+        inp = json.dumps(event.get("tool_input", {})).lower()
+        # Don't trigger on corvid's own commands
+        if "corvid" not in inp:
+            print(json.dumps({
+                "decision": "approve",
+                "reason": "Tip: corvid wiki has cross-project knowledge. "
+                          "Run `corvid search \\"<topic>\\" --json` to check for relevant insights."
+            }))
+            sys.exit(0)
+    sys.exit(0)
+""")
+
+
+def _install_hook():
+    """Install PreToolUse hook in Claude Code settings."""
+    settings_dir = os.path.expanduser("~/.claude")
+    settings_path = os.path.join(settings_dir, "settings.json")
+
+    # Write hook script
+    hook_dir = os.path.join(settings_dir, "hooks")
+    os.makedirs(hook_dir, exist_ok=True)
+    hook_path = os.path.join(hook_dir, "corvid_remind.py")
+    with open(hook_path, "w", encoding="utf-8") as f:
+        f.write(_HOOK_SCRIPT)
+    os.chmod(hook_path, 0o755)
+
+    # Read existing settings
+    settings = {}
+    if os.path.exists(settings_path):
+        with open(settings_path, "r", encoding="utf-8") as f:
+            try:
+                settings = json.load(f)
+            except json.JSONDecodeError:
+                settings = {}
+
+    # Add hook if not already present
+    hooks = settings.setdefault("hooks", {})
+    pre_hooks = hooks.setdefault("PreToolUse", [])
+    hook_entry = {"type": "command", "command": f"python3 {hook_path}"}
+    # Check if already installed
+    if not any("corvid_remind" in str(h.get("command", "")) for h in pre_hooks):
+        pre_hooks.append(hook_entry)
+        with open(settings_path, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2)
+        return True
+    return False
+
+
 def cmd_install():
     """Detect agents, install skill, initialize database."""
     print()
@@ -733,7 +916,6 @@ def cmd_install():
             print(f"  - {agent_name:16s} \u2192 not found, skipping")
 
     if not installed:
-        # No agent dirs found -- install for Claude Code anyway (most common)
         skill_dir = AGENTS["Claude Code"]
         os.makedirs(skill_dir, exist_ok=True)
         skill_path = os.path.join(skill_dir, "SKILL.md")
@@ -742,7 +924,14 @@ def cmd_install():
         installed.append(("Claude Code", skill_path))
         print(f"  \u2713 Claude Code      \u2192 {skill_path} (created)")
 
-    # 2. Init wiki + database
+    # 2. Install PreToolUse hook for Claude Code
+    if os.path.isdir(os.path.expanduser("~/.claude")):
+        if _install_hook():
+            print(f"  \u2713 PreToolUse hook  \u2192 wiki reminder before Bash/Glob/Grep")
+        else:
+            print(f"  - PreToolUse hook  \u2192 already installed")
+
+    # 3. Init wiki + database
     print()
     os.makedirs(ARTICLES_DIR, exist_ok=True)
     conn = get_db()
@@ -750,7 +939,7 @@ def cmd_install():
     print(f"  Wiki: {WIKI_DIR}")
     print(f"  Database: {DB_PATH}")
 
-    # 3. Report semantic search status
+    # 4. Report semantic search status
     print()
     if _SEMANTIC_AVAILABLE:
         print(f"  Semantic search: enabled ({EMBED_MODEL})")
